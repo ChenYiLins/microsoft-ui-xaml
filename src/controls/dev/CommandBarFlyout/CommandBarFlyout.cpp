@@ -64,93 +64,25 @@ CommandBarFlyout::CommandBarFlyout()
             {
                 SharedHelpers::ForwardVectorChange(sender, commandBar.SecondaryCommands(), args);
 
-                // We want to ensure that any interaction with secondary items causes the CommandBarFlyout
-                // to close, so we'll attach a Click handler to any buttons and Checked/Unchecked handlers
-                // to any toggle buttons that we get and close the flyout when they're invoked.
-                // The only exception is buttons with flyouts - in that case, clicking on the button
-                // will just open the flyout rather than executing an action, so we don't want that to
-                // do anything.
-                const int index = args.Index();
-                const auto closeFlyoutFunc = [this](auto const& sender, auto const& args) { Hide(); };
-
+                // Clear event handlers when items are removed or reset.
+                // Event handlers will be hooked when the flyout opens.
                 switch (args.CollectionChange())
                 {
-                case winrt::CollectionChange::ItemChanged:
-                {
-                    auto element = sender.GetAt(index);
-                    auto button = element.try_as<winrt::AppBarButton>();
-                    auto toggleButton = element.try_as<winrt::AppBarToggleButton>();
-
-                    UnhookCommandBarElementDependencyPropertyChanges(index);
-
-                    if (button)
-                    {
-                        HookAppBarButtonDependencyPropertyChanges(button, index);
-                    }
-                    else if (toggleButton)
-                    {
-                        HookAppBarToggleButtonDependencyPropertyChanges(toggleButton, index);
-                    }
-
-                    if (button && !button.Flyout())
-                    {
-                        m_secondaryButtonClickRevokerByIndexMap[index] = button.Click(winrt::auto_revoke, closeFlyoutFunc);
-                        SharedHelpers::EraseIfExists(m_secondaryToggleButtonCheckedRevokerByIndexMap, index);
-                        SharedHelpers::EraseIfExists(m_secondaryToggleButtonUncheckedRevokerByIndexMap, index);
-                    }
-                    else if (toggleButton)
-                    {
-                        SharedHelpers::EraseIfExists(m_secondaryButtonClickRevokerByIndexMap, index);
-                        m_secondaryToggleButtonCheckedRevokerByIndexMap[index] = toggleButton.Checked(winrt::auto_revoke, closeFlyoutFunc);
-                        m_secondaryToggleButtonUncheckedRevokerByIndexMap[index] = toggleButton.Unchecked(winrt::auto_revoke, closeFlyoutFunc);
-                    }
-                    else
-                    {
-                        SharedHelpers::EraseIfExists(m_secondaryButtonClickRevokerByIndexMap, index);
-                        SharedHelpers::EraseIfExists(m_secondaryToggleButtonCheckedRevokerByIndexMap, index);
-                        SharedHelpers::EraseIfExists(m_secondaryToggleButtonUncheckedRevokerByIndexMap, index);
-                    }
-                    break;
-                }
-                case winrt::CollectionChange::ItemInserted:
-                {
-                    auto element = sender.GetAt(index);
-                    auto button = element.try_as<winrt::AppBarButton>();
-                    auto toggleButton = element.try_as<winrt::AppBarToggleButton>();
-
-                    if (button)
-                    {
-                        HookAppBarButtonDependencyPropertyChanges(button, index);
-                    }
-                    else if (toggleButton)
-                    {
-                        HookAppBarToggleButtonDependencyPropertyChanges(toggleButton, index);
-                    }
-
-                    if (button && !button.Flyout())
-                    {
-                        m_secondaryButtonClickRevokerByIndexMap[index] = button.Click(winrt::auto_revoke, closeFlyoutFunc);
-                    }
-                    else if (toggleButton)
-                    {
-                        m_secondaryToggleButtonCheckedRevokerByIndexMap[index] = toggleButton.Checked(winrt::auto_revoke, closeFlyoutFunc);
-                        m_secondaryToggleButtonUncheckedRevokerByIndexMap[index] = toggleButton.Unchecked(winrt::auto_revoke, closeFlyoutFunc);
-                    }
-                    break;
-                }
                 case winrt::CollectionChange::ItemRemoved:
+                {
+                    const int index = args.Index();
                     UnhookCommandBarElementDependencyPropertyChanges(index);
-
                     SharedHelpers::EraseIfExists(m_secondaryButtonClickRevokerByIndexMap, index);
                     SharedHelpers::EraseIfExists(m_secondaryToggleButtonCheckedRevokerByIndexMap, index);
                     SharedHelpers::EraseIfExists(m_secondaryToggleButtonUncheckedRevokerByIndexMap, index);
                     break;
+                }
                 case winrt::CollectionChange::Reset:
-                    SetSecondaryCommandsToCloseWhenExecuted();
-                    HookAllCommandBarElementDependencyPropertyChanges();
+                    UnhookAllCommandBarElementDependencyPropertyChanges();
+                    m_secondaryButtonClickRevokerByIndexMap.clear();
+                    m_secondaryToggleButtonCheckedRevokerByIndexMap.clear();
+                    m_secondaryToggleButtonUncheckedRevokerByIndexMap.clear();
                     break;
-                default:
-                    MUX_ASSERT(false);
                 }
             }
         }
@@ -159,6 +91,11 @@ CommandBarFlyout::CommandBarFlyout()
     Opening({
         [this](auto const&, auto const&)
         {
+            // Hook event handlers for secondary commands when the flyout is opening.
+            // This is deferred until now to improve performance when adding items to SecondaryCommands.
+            SetSecondaryCommandsToCloseWhenExecuted();
+            HookAllCommandBarElementDependencyPropertyChanges();
+
             // The CommandBarFlyout is shown in standard mode in the case
             // where it's being opened as a context menu, rather than as a selection flyout.
             // In that circumstance, we want to have the flyout be open from the start.
@@ -318,9 +255,6 @@ winrt::Control CommandBarFlyout::CreatePresenter()
 
     SharedHelpers::CopyVector(m_primaryCommands, commandBar->PrimaryCommands());
     SharedHelpers::CopyVector(m_secondaryCommands, commandBar->SecondaryCommands());
-
-    SetSecondaryCommandsToCloseWhenExecuted();
-    HookAllCommandBarElementDependencyPropertyChanges();
 
     winrt::FlyoutPresenter presenter;
     presenter.Background(nullptr);
